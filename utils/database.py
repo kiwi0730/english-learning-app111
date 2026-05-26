@@ -442,6 +442,10 @@ class DatabaseManager:
         conn.close()
         return exam_id
 
+    def save_exam_paper(self, user_id: int, level: str, exam_type: str, difficulty: int, paper_json: str) -> int:
+        """保存试卷 - 与save_exam功能相同，为兼容性提供"""
+        return self.save_exam(user_id, level, exam_type, difficulty, paper_json)
+
     def update_exam_status(self, exam_id: int, status: str):
         """更新试卷状态"""
         conn = sqlite3.connect(self.db_path)
