@@ -442,8 +442,8 @@ class DatabaseManager:
         conn.close()
         return exam_id
 
-    def save_exam_paper(self, user_id: int, level: str, exam_type: str, difficulty: int, paper_json: str, answers_json: str = None) -> int:
-        """保存试卷 - 与save_exam功能相同，但包含answers_json参数"""
+    def save_exam_paper(self, user_id: int, level: str, exam_type: str = None, difficulty: int = 5, paper_json: str = None, answers_json: str = None) -> int:
+        """保存试卷 - 支持灵活的参数调用"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         cursor.execute("""
