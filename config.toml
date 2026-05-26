@@ -1,12 +1,8 @@
-# 使用 Streamlit 默认主题
-# 如需后期统一 UI，可再添加 [theme] 配置。
-
 [server]
-# 本地开发：启动后自动打开浏览器
-headless = false
-# 仅绑定本机地址，避免显示局域网/外网访问地址
-address = "localhost"
+headless = true
+address = "0.0.0.0"
+port = 8501
+enableCORS = false
 
 [browser]
-# 关闭匿名统计
 gatherUsageStats = false
