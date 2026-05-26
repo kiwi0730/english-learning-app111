@@ -442,9 +442,18 @@ class DatabaseManager:
         conn.close()
         return exam_id
 
-    def save_exam_paper(self, user_id: int, level: str, exam_type: str, difficulty: int, paper_json: str) -> int:
-        """保存试卷 - 与save_exam功能相同，为兼容性提供"""
-        return self.save_exam(user_id, level, exam_type, difficulty, paper_json)
+    def save_exam_paper(self, user_id: int, level: str, exam_type: str, difficulty: int, paper_json: str, answers_json: str = None) -> int:
+        """保存试卷 - 与save_exam功能相同，但包含answers_json参数"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO exam_papers (user_id, level, exam_type, difficulty, paper_json, answers_json, status)
+            VALUES (?, ?, ?, ?, ?, ?, 'pending')
+        """, (user_id, level, exam_type, difficulty, paper_json, answers_json))
+        exam_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        return exam_id
 
     def update_exam_status(self, exam_id: int, status: str):
         """更新试卷状态"""
