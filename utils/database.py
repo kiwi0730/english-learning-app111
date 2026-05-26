@@ -442,8 +442,29 @@ class DatabaseManager:
         conn.close()
         return exam_id
 
-    def save_exam_paper(self, user_id: int, level: str, exam_type: str = None, difficulty: int = 5, paper_json: str = None, answers_json: str = None) -> int:
-        """保存试卷 - 支持灵活的参数调用，自动处理字典转JSON"""
+    def save_exam_paper(self, user_id: int = None, level: str = None, exam_type: str = None, difficulty: int = 5, paper_json: str = None, answers_json: str = None) -> int:
+        """保存试卷 - 支持任意顺序的参数调用，自动处理数据类型转换"""
+        # 处理参数类型转换
+        if isinstance(exam_type, dict):
+            # 如果exam_type是字典，可能是paper_json，需要重新分配参数
+            if paper_json is None:
+                paper_json = exam_type
+                exam_type = "normal"  # 默认考试类型
+            else:
+                # 如果paper_json不是None，说明参数顺序可能错误，尝试提取type
+                try:
+                    exam_type = exam_type.get("exam_type", "normal") if isinstance(exam_type, dict) else str(exam_type)
+                except:
+                    exam_type = "normal"
+        
+        if isinstance(difficulty, dict):
+            # 如果difficulty是字典，说明参数位置错乱，需要重新调整
+            if paper_json is None:
+                paper_json = difficulty
+                difficulty = 5  # 默认难度
+            else:
+                difficulty = 5
+        
         # 如果paper_json是字典，转换为JSON字符串
         if isinstance(paper_json, dict):
             paper_json = json.dumps(paper_json, ensure_ascii=False)
@@ -453,6 +474,14 @@ class DatabaseManager:
         # 如果answers_json是字典，转换为JSON字符串
         if isinstance(answers_json, dict):
             answers_json = json.dumps(answers_json, ensure_ascii=False)
+        elif answers_json is None:
+            answers_json = json.dumps({}, ensure_ascii=False)
+        
+        # 确保exam_type是字符串
+        if exam_type is None:
+            exam_type = "normal"
+        elif not isinstance(exam_type, str):
+            exam_type = str(exam_type)
         
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
