@@ -270,6 +270,105 @@ class DatabaseManager:
                 })
         return words
 
+    def get_words_by_difficulty(self, level: str, difficulty: int = 5, limit: int = 20) -> List[Dict]:
+        """根据难度获取单词"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        # 根据难度调整查询策略，但目前我们使用随机选择
+        cursor.execute(
+            "SELECT word, raw_json FROM word_bank_words WHERE level = ? ORDER BY RANDOM() LIMIT ?",
+            (level, limit)
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        
+        words = []
+        for word, raw_json in rows:
+            try:
+                word_data = json.loads(raw_json) if raw_json else {}
+                words.append({
+                    "word": word,
+                    "definition": word_data.get("definition", ""),
+                    "example": word_data.get("example", "")
+                })
+            except json.JSONDecodeError:
+                words.append({
+                    "word": word,
+                    "definition": "",
+                    "example": ""
+                })
+        return words
+
+    def get_recent_scores(self, user_id: int, level: str, recent_n: int = 10) -> List[Dict]:
+        """获取最近的分数记录"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT s.total_score, s.total_possible, s.created_at, s.reading_score, s.reading_possible,
+                   s.translation_score, s.translation_possible, s.writing_score, s.writing_possible
+            FROM scores s
+            JOIN exam_papers ep ON s.exam_id = ep.exam_id
+            WHERE s.user_id = ? AND s.level = ?
+            ORDER BY s.created_at DESC
+            LIMIT ?
+        """, (user_id, level, recent_n))
+        rows = cursor.fetchall()
+        conn.close()
+        
+        scores = []
+        for row in rows:
+            scores.append({
+                "total_score": row[0],
+                "total_possible": row[1],
+                "created_at": row[2],
+                "reading_score": row[3],
+                "reading_possible": row[4],
+                "translation_score": row[5],
+                "translation_possible": row[6],
+                "writing_score": row[7],
+                "writing_possible": row[8]
+            })
+        return scores
+
+    def get_user_performance_stats(self, user_id: int, level: str) -> Dict:
+        """获取用户表现统计"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        # 获取总体统计
+        cursor.execute("""
+            SELECT 
+                AVG(total_score * 1.0 / total_possible) as avg_accuracy,
+                COUNT(*) as total_exams,
+                MAX(total_score * 100.0 / total_possible) as max_score_percent,
+                MIN(total_score * 100.0 / total_possible) as min_score_percent
+            FROM scores s
+            JOIN exam_papers ep ON s.exam_id = ep.exam_id
+            WHERE s.user_id = ? AND s.level = ?
+        """, (user_id, level))
+        stats_row = cursor.fetchone()
+        
+        # 获取最近错误的单词
+        cursor.execute("""
+            SELECT ww.word, ww.error_count
+            FROM wrong_words ww
+            WHERE ww.user_id = ? AND ww.level = ?
+            ORDER BY ww.error_count DESC, ww.last_error_time DESC
+            LIMIT 10
+        """, (user_id, level))
+        wrong_words = cursor.fetchall()
+        
+        conn.close()
+        
+        return {
+            "avg_accuracy": stats_row[0] if stats_row[0] is not None else 0,
+            "total_exams": stats_row[1] if stats_row[1] is not None else 0,
+            "max_score_percent": stats_row[2] if stats_row[2] is not None else 0,
+            "min_score_percent": stats_row[3] if stats_row[3] is not None else 0,
+            "wrong_words": [{"word": w[0], "count": w[1]} for w in wrong_words]
+        }
+
     def record_word_quiz(self, user_id: int, level: str, word: str, is_correct: bool):
         """记录单词测试结果"""
         conn = sqlite3.connect(self.db_path)
