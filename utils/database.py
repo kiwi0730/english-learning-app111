@@ -443,7 +443,17 @@ class DatabaseManager:
         return exam_id
 
     def save_exam_paper(self, user_id: int, level: str, exam_type: str = None, difficulty: int = 5, paper_json: str = None, answers_json: str = None) -> int:
-        """保存试卷 - 支持灵活的参数调用"""
+        """保存试卷 - 支持灵活的参数调用，自动处理字典转JSON"""
+        # 如果paper_json是字典，转换为JSON字符串
+        if isinstance(paper_json, dict):
+            paper_json = json.dumps(paper_json, ensure_ascii=False)
+        elif paper_json is None:
+            paper_json = json.dumps({}, ensure_ascii=False)
+        
+        # 如果answers_json是字典，转换为JSON字符串
+        if isinstance(answers_json, dict):
+            answers_json = json.dumps(answers_json, ensure_ascii=False)
+        
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         cursor.execute("""
@@ -474,6 +484,10 @@ class DatabaseManager:
 
     def save_exam_answers(self, exam_id: int, answers_json: str):
         """保存试卷答案"""
+        # 如果answers_json是字典，转换为JSON字符串
+        if isinstance(answers_json, dict):
+            answers_json = json.dumps(answers_json, ensure_ascii=False)
+        
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         cursor.execute(
@@ -522,10 +536,17 @@ class DatabaseManager:
         conn.close()
         
         if row:
+            try:
+                paper_json = json.loads(row[1]) if row[1] else {}
+                answers_json = json.loads(row[2]) if row[2] else {}
+            except json.JSONDecodeError:
+                paper_json = {}
+                answers_json = {}
+                
             return {
                 "exam_id": row[0],
-                "paper_json": row[1],
-                "answers_json": row[2],
+                "paper_json": paper_json,
+                "answers_json": answers_json,
                 "level": row[3],
                 "exam_type": row[4],
                 "status": row[5]
