@@ -4,7 +4,7 @@ from pathlib import Path
 import random
 from utils.exam_schema import normalize_exam_paper
 from typing import List, Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 import re
 
@@ -696,6 +696,345 @@ class DatabaseManager:
                 })
         
         return scores
+
+    # 以下为系统所需的方法
+    
+    def get_exam_paper(self, exam_id: int) -> Optional[Dict[str, Any]]:
+        """获取指定试卷"""
+        return self.get_exam_by_id(exam_id)
+
+    def get_latest_exam_paper(self, user_id: int, level: str = None) -> Optional[Dict[str, Any]]:
+        """获取最新试卷"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        if level:
+            cursor.execute("""
+                SELECT exam_id, paper_json, answers_json, level, exam_type, status
+                FROM exam_papers
+                WHERE user_id = ? AND level = ?
+                ORDER BY created_at DESC
+                LIMIT 1
+            """, (user_id, level))
+        else:
+            cursor.execute("""
+                SELECT exam_id, paper_json, answers_json, level, exam_type, status
+                FROM exam_papers
+                WHERE user_id = ?
+                ORDER BY created_at DESC
+                LIMIT 1
+            """, (user_id,))
+        
+        row = cursor.fetchone()
+        conn.close()
+        
+        if row:
+            try:
+                paper_json = json.loads(row[1]) if row[1] else {}
+                answers_json = json.loads(row[2]) if row[2] else {}
+            except json.JSONDecodeError:
+                paper_json = {}
+                answers_json = {}
+                
+            return {
+                "exam_id": row[0],
+                "paper_json": paper_json,
+                "answers_json": answers_json,
+                "level": row[3],
+                "exam_type": row[4],
+                "status": row[5]
+            }
+        return None
+
+    def get_exam_papers(self, user_id: int, level: str = None) -> List[Dict]:
+        """获取用户的所有试卷"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        if level:
+            cursor.execute("""
+                SELECT exam_id, level, exam_type, difficulty, paper_json, answers_json, status, created_at
+                FROM exam_papers
+                WHERE user_id = ? AND level = ?
+                ORDER BY created_at DESC
+            """, (user_id, level))
+        else:
+            cursor.execute("""
+                SELECT exam_id, level, exam_type, difficulty, paper_json, answers_json, status, created_at
+                FROM exam_papers
+                WHERE user_id = ?
+                ORDER BY created_at DESC
+            """, (user_id,))
+        
+        rows = cursor.fetchall()
+        conn.close()
+        
+        exams = []
+        for row in rows:
+            try:
+                paper_json = json.loads(row[4]) if row[4] else {}
+                answers_json = json.loads(row[5]) if row[5] else {}
+            except json.JSONDecodeError:
+                paper_json = {}
+                answers_json = {}
+                
+            exams.append({
+                "exam_id": row[0],
+                "level": row[1],
+                "exam_type": row[2],
+                "difficulty": row[3],
+                "paper_json": paper_json,
+                "answers_json": answers_json,
+                "status": row[6],
+                "created_at": row[7]
+            })
+        
+        return exams
+
+    def get_scores(self, user_id: int, level: str = None, limit: int = None, time_range: str = None) -> List[Dict]:
+        """获取用户成绩记录，支持过滤条件"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        query = """
+            SELECT s.total_score, s.total_possible, s.reading_score, s.reading_possible,
+                   s.translation_score, s.translation_possible, s.writing_score, s.writing_possible,
+                   s.created_at, ep.level, ep.exam_type, ep.difficulty, ep.exam_id
+            FROM scores s
+            JOIN exam_papers ep ON s.exam_id = ep.exam_id
+            WHERE s.user_id = ?
+        """
+        params = [user_id]
+        
+        if level:
+            query += " AND ep.level = ?"
+            params.append(level)
+        
+        if time_range:
+            if time_range == "week":
+                query += " AND s.created_at >= datetime('now', '-7 days')"
+            elif time_range == "month":
+                query += " AND s.created_at >= datetime('now', '-30 days')"
+            elif time_range == "quarter":
+                query += " AND s.created_at >= datetime('now', '-90 days')"
+        
+        query += " ORDER BY s.created_at DESC"
+        
+        if limit:
+            query += f" LIMIT {limit}"
+        
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+        conn.close()
+        
+        scores = []
+        for row in rows:
+            scores.append({
+                "total_score": row[0],
+                "total_possible": row[1],
+                "reading_score": row[2],
+                "reading_possible": row[3],
+                "translation_score": row[4],
+                "translation_possible": row[5],
+                "writing_score": row[6],
+                "writing_possible": row[7],
+                "created_at": row[8],
+                "level": row[9],
+                "exam_type": row[10],
+                "difficulty": row[11],
+                "exam_id": row[12]
+            })
+        
+        return scores
+
+    def get_question_results(self, exam_id: int) -> List[Dict[str, Any]]:
+        """获取指定试卷的题目结果"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT question_id, question_type, user_answer, is_correct, score_earned,
+                   ai_feedback, section_id, correct_answer, explanation, grading_status
+            FROM exam_question_results
+            WHERE exam_id = ?
+            ORDER BY question_id
+        """, (exam_id,))
+        rows = cursor.fetchall()
+        conn.close()
+        
+        results = []
+        for row in rows:
+            results.append({
+                "question_id": row[0],
+                "question_type": row[1],
+                "user_answer": row[2],
+                "is_correct": bool(row[3]),
+                "score_earned": row[4],
+                "ai_feedback": row[5],
+                "section_id": row[6],
+                "correct_answer": row[7],
+                "explanation": row[8],
+                "grading_status": row[9]
+            })
+        
+        return results
+
+    def save_word_result(self, user_id: int, level: str, word: str, is_correct: bool, source: str = "quiz"):
+        """保存单词测试结果"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO word_quiz_records (user_id, level, word, is_correct) VALUES (?, ?, ?, ?)",
+            (user_id, level, word, 1 if is_correct else 0)
+        )
+        
+        # 如果答错，加入错词本
+        if not is_correct:
+            cursor.execute("""
+                INSERT INTO wrong_words (user_id, level, word, source, error_count, last_error_time)
+                VALUES (?, ?, ?, ?, 1, CURRENT_TIMESTAMP)
+                ON CONFLICT(user_id, level, word, source) 
+                DO UPDATE SET 
+                    error_count = error_count + 1,
+                    last_error_time = CURRENT_TIMESTAMP
+            """, (user_id, level, word, source))
+        
+        conn.commit()
+        conn.close()
+
+    def get_tested_words(self, user_id: int, level: str = None, limit: int = None) -> List[Dict]:
+        """获取用户测试过的单词"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        query = "SELECT word, is_correct, quiz_date FROM word_quiz_records WHERE user_id = ?"
+        params = [user_id]
+        
+        if level:
+            query += " AND level = ?"
+            params.append(level)
+        
+        query += " ORDER BY quiz_date DESC"
+        
+        if limit:
+            query += f" LIMIT {limit}"
+        
+        cursor.execute(query, params)
+        rows = cursor.fetchall()
+        conn.close()
+        
+        tested_words = []
+        for row in rows:
+            tested_words.append({
+                "word": row[0],
+                "is_correct": bool(row[1]),
+                "quiz_date": row[2]
+            })
+        
+        return tested_words
+
+    def search_word(self, word: str, level: str = None) -> Optional[Dict[str, Any]]:
+        """搜索单词"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        if level:
+            cursor.execute(
+                "SELECT word, raw_json FROM word_bank_words WHERE word = ? AND level = ?",
+                (word, level)
+            )
+        else:
+            cursor.execute(
+                "SELECT word, raw_json FROM word_bank_words WHERE word = ?",
+                (word,)
+            )
+        
+        row = cursor.fetchone()
+        conn.close()
+        
+        if row:
+            try:
+                raw_data = json.loads(row[1]) if row[1] else {}
+                return {
+                    "word": row[0],
+                    "definition": raw_data.get("definition", ""),
+                    "example": raw_data.get("example", ""),
+                    "raw_data": raw_data
+                }
+            except json.JSONDecodeError:
+                return {
+                    "word": row[0],
+                    "definition": "",
+                    "example": "",
+                    "raw_data": {}
+                }
+        return None
+
+    def save_question_results(self, exam_id: int, question_results: List[Dict[str, Any]]) -> int:
+        """批量保存题目结果"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        success_count = 0
+        
+        for result in question_results:
+            try:
+                cursor.execute("""
+                    INSERT OR REPLACE INTO exam_question_results 
+                    (exam_id, question_id, question_type, user_answer, is_correct, score_earned, 
+                     ai_feedback, section_id, correct_answer, explanation, grading_status)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    exam_id,
+                    result.get("question_id"),
+                    result.get("question_type"),
+                    result.get("user_answer"),
+                    result.get("is_correct", False),
+                    result.get("score_earned", 0),
+                    result.get("ai_feedback", ""),
+                    result.get("section_id", ""),
+                    result.get("correct_answer", ""),
+                    result.get("explanation", ""),
+                    result.get("grading_status", "graded")
+                ))
+                success_count += 1
+            except Exception as e:
+                print(f"保存题目结果时出错: {e}")
+                continue
+        
+        conn.commit()
+        conn.close()
+        return success_count
+
+    def update_exam_paper(self, exam_id: int, paper_json: Dict = None, answers_json: Dict = None, status: str = None):
+        """更新试卷信息"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        updates = []
+        params = []
+        
+        if paper_json is not None:
+            if isinstance(paper_json, dict):
+                paper_json = json.dumps(paper_json, ensure_ascii=False)
+            updates.append("paper_json = ?")
+            params.append(paper_json)
+        
+        if answers_json is not None:
+            if isinstance(answers_json, dict):
+                answers_json = json.dumps(answers_json, ensure_ascii=False)
+            updates.append("answers_json = ?")
+            params.append(answers_json)
+        
+        if status is not None:
+            updates.append("status = ?")
+            params.append(status)
+        
+        if updates:
+            query = f"UPDATE exam_papers SET {', '.join(updates)} WHERE exam_id = ?"
+            params.append(exam_id)
+            cursor.execute(query, params)
+        
+        conn.commit()
+        conn.close()
 
 
 # 创建全局实例
