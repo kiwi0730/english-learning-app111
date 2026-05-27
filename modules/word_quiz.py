@@ -21,15 +21,19 @@ PREFIX = "word_quiz"
 
 
 def _build_confusing_options_prompt(words: list) -> str:
-    """生成易混淆选项的 prompt"""
+    """生成易混淆选项的 prompt（支持中英文两种）"""
     word_list = "\n".join([f"- {w.get('word', '')}: {w.get('meaning', '')}" for w in words])
     return f"""
-你是一个英语单词辅助出题助手。请为以下每个单词生成2个易混淆的中文选项。
+你是一个英语单词辅助出题助手。请为以下每个单词生成2个易混淆的选项。
 
 要求：
-1. 每个单词生成2个错误选项（中文含义必须与正确答案词性相同）
-2. 例如：正确答案是"苹果"（名词），错误选项可以是"梨子"、"香蕉"
-3. 保持输出为合法的JSON格式
+1. 每个单词生成2个错误选项（词性必须与正确答案相同）
+2. 需要同时提供中文和英文的易混淆选项
+3. 例如：
+   - 单词 "apple"，正确含义 "苹果"
+   - 中文混淆选项：["梨子", "香蕉"]
+   - 英文混淆选项：["apply", "pineapple"]
+4. 保持输出为合法的JSON格式
 
 输入单词：
 {word_list}
@@ -40,7 +44,8 @@ def _build_confusing_options_prompt(words: list) -> str:
         {{
             "word": "apple",
             "correct_meaning": "苹果",
-            "confusing_options": ["梨子", "香蕉"]
+            "confusing_options_cn": ["梨子", "香蕉"],
+            "confusing_options_en": ["apply", "pineapple"]
         }},
         ...
     ]
