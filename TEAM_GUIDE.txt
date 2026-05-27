@@ -1,0 +1,254 @@
+# CET4/6 智能英语教学系统 - 团队开发指南
+
+## 环境配置
+
+### 基本要求
+- Python 3.8+
+- 网络连接（用于安装依赖和调用AI API）
+
+### 安装步骤
+1. **进入项目目录**：`cd app`
+2. **安装依赖**（使用国内镜像源）：
+   ```bash
+   pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/
+   ```
+3. **验证依赖**：`python check_dependencies.py`
+4. **运行应用**：`streamlit run app.py`
+5. **浏览器访问**：http://localhost:8501
+
+### 依赖说明
+- **核心依赖**：Streamlit（Web框架）
+- **AI功能**：硅基流动 API + requests
+- **数据处理**：pandas
+- **数据可视化**：plotly
+- **API调用**：requests
+- **环境管理**：python-dotenv
+
+### 验证步骤
+运行 `python check_dependencies.py` 查看所有依赖是否安装成功。如果显示所有版本信息，则依赖安装完成。
+
+## 项目结构
+
+```
+app4_251/
+├── app.py                            # A 写：主入口（登录+导航）
+├── requirements.txt                  # 依赖包列表
+│
+├── modules/                          # 页面模块
+│   ├── word_quiz.py                 # C 写：单词考察（业务逻辑：AI调用、提交批改）
+│   ├── word_quiz_ui.py              # A写：单词考察（UI渲染、AI解析、状态机）
+│   ├── normal_exam.py               # B 写：正常出卷页面
+│   ├── personalized_exam.py         # D 写：个性化出卷页面
+│   ├── history.py                   # A 写：历史回顾页面
+│   ├── report.py                    # D 写：学情报告页面
+│   └── exam_common.py               # A 写：公共函数（轮询、UI组件）
+│
+├── utils/                           # 公共工具
+│   ├── database.py                  # A 写：数据库操作
+│   ├── call_ai.py                   # A 写：AI调用功能
+│   ├── ai_exam_pipeline.py          # D 写：正常出卷流程
+│   ├── personalized_exam_prompts.py # D 写：个性化出卷prompts
+│   ├── exam_prompts.py              # B 写：正常出卷prompts
+│   ├── exam_ai_parser.py            # A 写：AI返回解析
+│   ├── exam_ui.py                   # A 写：试卷UI组件
+│   ├── exam_schema.py               # A 写：数据格式定义
+│   ├── ai_grading.py                #  写：AI批改入口
+│   └── config.py                    # A 写：配置管理
+│
+├── data/                            # 数据文件
+│   ├── CET4_complete.json           # 四级完整词库
+│   ├── CET4_highquality.json        # 四级高频词库
+│   ├── CET6_complete.json           # 六级完整词库
+│   └── CET6_highquality.json       # 六级高频词库
+|   |___CET4_真题
+|   |___CET6_真题│
+├── local_database.db                 # 数据库文件
+└── TEAM_GUIDE.txt                   # 团队开发指南
+```
+## 功能模块
+
+| 模块 | 功能 | 说明 |
+|------|------|------|
+| 单词考察 | 高频小测 | 英译中选择题，优先考察错词，结合遗忘曲线单词复习 |
+| 出卷 | 正常出卷 | 用户选择难度和试卷类型，系统自动控制高频词配比、语法复杂度及文本题材变量；AI生成试卷时同步产出每道题的深度解析 |
+| | 个性化出卷 | 结合近期3次历史试卷（难度自适应）和错词生成个性化试卷 |
+| 历史回顾 | 试卷回顾 | 查看之前做过的试卷及答案解析，主观题AI解析 |
+| 学情报告 | 成绩趋势、薄弱点分析 | 可视化展示学习状况 |
+
+
+## API接口说明
+
+### 词库使用（所有人）
+```python
+from utils.database import db
+
+# 获取单词（双词库配比，根据难度自动分配高频词和完整词库比例）
+words = db.get_words_by_difficulty("CET4", 5, 20)  # 四级，难度5，20个单词
+
+# 获取所有单词（支持variant参数："complete"完整词库 或 "highquality"高频词库）
+all_words = db.get_all_words("CET4")  # 默认获取完整词库
+all_words = db.get_all_words("CET4", "highquality")  # 获取高频词库
+
+# 获取错词列表（优先考察这些单词）
+wrong_words = db.get_wrong_words(user_id, level)
+# 返回: [{"word": "abandon", "error_count": 3, "last_error_time": "..."}, ...]
+
+# 获取已考察过的单词
+tested_words = db.get_tested_words(user_id, level)
+# 返回: [{"word": "steady", "is_correct": 0, "quiz_date": "2026-04-25 15:40:21"}, ...]
+tested_words = db.get_tested_words(user_id, "CET4", limit=50)  # 支持limit参数
+```
+
+### A 用（历史回顾、单词考察UI）
+```python
+# 历史回顾
+from utils.database import db
+from utils.exam_schema import normalize_exam_paper
+
+# 获取用户的历史试卷列表
+papers = db.get_exam_papers(user_id)              # 获取所有历史试卷
+papers = db.get_exam_papers(user_id, "CET4")       # 按级别筛选
+
+# 获取成绩记录
+scores = db.get_scores(user_id, level)            # 获取指定级别的所有成绩
+
+# 获取某张试卷的详细结果
+results = db.get_question_results(exam_id)        # 获取试卷的每题答题结果
+
+# 归一化试卷格式（将旧版或半成品试卷转为标准格式）
+paper = normalize_exam_paper(paper)               # 返回标准化的试卷字典
+
+# 单词考察UI（纯UI，无特殊API）
+```
+
+### B 用（正常出卷）
+```python
+from utils.ai_exam_pipeline import generate_exam, generate_answers_sync
+from utils.call_ai import check_ai
+from utils.database import db
+from utils.exam_schema import (
+    build_exam_paper,           # 构造完整试卷JSON结构
+    build_submission,           # 构造提交/草稿状态
+    build_answers_payload,      # 构造答案保存结构
+    count_questions,            # 统计试卷总题数
+    extract_question_bank,      # 将试卷sections拉平为题目列表
+    normalize_level,            # 统一级别命名（CET4/CET6）
+)
+
+# AI调用
+check_ai()                     # 检查AI接口是否可用，返回True/False
+
+# 生成试卷（一次性生成全部6个section：写作、翻译、选词、仔细阅读x2、长篇阅读）
+paper = generate_exam(level, difficulty, words, exam_type="normal_exam", generation_mode="ai")
+
+# 生成答案与解析（同步调用，返回解析后的答案payload和带答案的试卷）
+answers_payload, paper_copy = generate_answers_sync(paper)
+
+# 数据库操作
+words = db.get_words_by_difficulty(level, difficulty, 50)  # 获取50个单词作为出题参考
+exam_id = db.save_exam_paper(user_id, level, paper_json)  # 保存试卷到数据库，返回exam_id
+db.update_exam_paper(exam_id, paper_json=paper_json, answers_json=answers_json, status="ready")  # 更新试卷状态
+```
+
+### C 用（单词考察）
+```python
+from modules.word_quiz_ui import render_word_quiz_setup, render_word_quiz_interface, handle_word_quiz
+from utils.call_ai import call_ai_full
+from utils.database import db
+
+# 获取单词（根据难度和数量从词库抽取）
+words = db.get_words_by_difficulty(level, difficulty, word_count)
+
+# 获取错词列表（优先考察这些单词）
+wrong_words = db.get_wrong_words(user_id, level)
+# 返回: [{"word": "abandon", "error_count": 3, "last_error_time": "..."}, ...]
+
+# 获取已考察过的单词
+tested_words = db.get_tested_words(user_id, level)
+# 返回: [{"word": "steady", "is_correct": 0, "quiz_date": "2026-04-25 15:40:21"}, ...]
+tested_words = db.get_tested_words(user_id, "CET4", limit=50)  # 支持limit参数
+
+# 保存单词考察结果（记录用户答题情况）
+db.save_word_result(user_id, level, word, is_correct, source='quiz')
+# 参数：user_id用户ID, level级别, word单词, is_correct是否正确, source来源(固定'quiz')
+
+# AI调用（生成易混淆选项）
+result = call_ai_full(prompt, max_retries=2, max_tokens=2048, timeout=180)
+# 参数：prompt提示词, max_retries重试次数, max_tokens最大token数, timeout超时秒数
+# 返回：{"status": "success", "content": "..."} 或 {"status": "failed", "error": "..."}
+
+# UI组件调用
+level, difficulty, word_count = render_word_quiz_setup(prefix)           # 渲染难度/数量选择控件
+render_word_quiz_interface(quiz_data, answers, prefix)                  # 渲染答题界面
+handle_word_quiz(user_id, on_generate, on_submit, prefix)              # 完整状态机处理
+```
+
+### D 用（个性化出卷、学情报告）
+```python
+# 个性化出卷
+from utils.ai_exam_pipeline import generate_answers_sync
+from utils.database import db
+from utils.exam_schema import (
+    build_exam_paper,           # 构造完整试卷JSON结构
+    build_submission,           # 构造提交/草稿状态
+    build_answers_payload,      # 构造答案保存结构
+    build_question_result,      # 构造单题结果（用于批改）
+    count_questions,            # 统计试卷总题数
+    extract_question_bank,      # 将试卷sections拉平为题目列表
+    normalize_level,            # 统一级别命名
+)
+from utils.personalized_exam_prompts import (
+    build_personalized_writing_prompt,         # 个性化写作prompt
+    build_personalized_translation_prompt,     # 个性化翻译prompt
+    build_personalized_banked_cloze_prompt,   # 个性化选词填空prompt
+    build_personalized_long_reading_prompt,    # 个性化长篇阅读prompt
+    build_personalized_close_reading_prompt,   # 个性化仔细阅读prompt
+)
+
+# 成绩相关API
+recent = db.get_recent_scores(user_id, level, limit=5)    # 获取最近N次成绩
+wrong_words = db.get_wrong_words(user_id, level)          # 获取用户的错词列表
+words = db.get_words_by_difficulty(level, difficulty, 50)  # 根据推荐难度获取单词
+exam_id = db.save_exam_paper(user_id, level, paper_json)  # 保存试卷
+db.update_exam_paper(exam_id, paper_json=paper_json, status="ready")  # 更新试卷状态
+db.save_question_results(exam_id, question_results)       # 批量保存题目结果（批改用）
+# 参数：exam_id试卷ID, question_results题目结果列表[build_question_result()返回的字典]
+score_id = db.save_score(user_id, level, total_score, total_possible, exam_id=exam_id)
+# 保存成绩，返回score_id（total_score实际得分，total_possible总分）
+
+# 批改函数（在personalized_exam.py中定义）
+_grade_objective_exam(exam_id, paper, answers, user_id)
+# 参数：exam_id试卷ID, paper试卷JSON, answers用户答案, user_id用户ID
+# 返回：{"status": "submitted", "objective_score": ..., ...}
+
+# 学情报告
+scores = db.get_scores(user_id, level)  # 获取指定级别的所有成绩记录
+```
+
+### 前端操作
+```python
+import streamlit as st
+
+# 获取用户ID
+user_id = st.session_state.get("user_id")
+level = st.session_state.get("level", "CET4")
+
+# 显示消息
+st.success("操作成功")
+st.error("操作失败")
+
+# 异常处理
+try:
+    # 数据库操作
+    pass
+except Exception as e:
+    st.error(f"错误：{str(e)}")
+```
+
+## 注意事项
+- 使用绝对导入：`from utils.database import db`
+- 只使用 db 实例提供的函数，不直接写 SQL
+- 保持代码风格一致，添加适当的注释
+- 确保功能模块与数据库操作正确集成
+
+祝你开发顺利！
