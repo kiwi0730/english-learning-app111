@@ -84,7 +84,7 @@ def _extract_json_payload(content: str):
 
 
 def parse_word_quiz_response(content: str, words: list) -> list:
-    """解析AI返回的易混淆选项，构造4选1题目"""
+    """解析AI返回的易混淆选项，构造4选1题目（支持中英文两种题型）"""
     try:
         payload = _extract_json_payload(content)
         if not payload:
@@ -104,20 +104,42 @@ def parse_word_quiz_response(content: str, words: list) -> list:
                 continue
             
             correct_meaning = ai_word.get("correct_meaning", original_word.get("meaning", ""))
-            confusing = ai_word.get("confusing_options", [])
             
-            if len(confusing) < 2:
-                continue
+            # 随机决定题型：True=英译中，False=中译英
+            is_en_to_cn = random.choice([True, False])
             
-            options = [correct_meaning] + confusing[:2]
-            random.shuffle(options)
-            
-            quiz_questions.append({
-                "word": word,
-                "correct_meaning": correct_meaning,
-                "correct_answer": correct_meaning,
-                "options": options,
-            })
+            if is_en_to_cn:
+                # 英译中题型：显示英文单词，选择中文含义
+                confusing = ai_word.get("confusing_options_cn", []) or ai_word.get("confusing_options", [])
+                if len(confusing) < 2:
+                    continue
+                
+                options = [correct_meaning] + confusing[:2]
+                random.shuffle(options)
+                
+                quiz_questions.append({
+                    "word": word,
+                    "correct_meaning": correct_meaning,
+                    "correct_answer": correct_meaning,
+                    "options": options,
+                    "question_type": "en_to_cn",  # 英译中
+                })
+            else:
+                # 中译英题型：显示中文含义，选择英文单词
+                confusing = ai_word.get("confusing_options_en", [])
+                if len(confusing) < 2:
+                    continue
+                
+                options = [word] + confusing[:2]
+                random.shuffle(options)
+                
+                quiz_questions.append({
+                    "word": correct_meaning,  # 显示中文
+                    "correct_meaning": word,  # 正确答案是英文
+                    "correct_answer": word,   # 正确答案
+                    "options": options,
+                    "question_type": "cn_to_en",  # 中译英
+                })
         
         return quiz_questions
     except Exception:
@@ -144,16 +166,24 @@ def render_word_quiz_setup(prefix: str = PREFIX) -> tuple:
 
 
 def render_word_quiz_interface(quiz_data: list, answers: dict, prefix: str = PREFIX) -> None:
-    """渲染答题界面"""
+    """渲染答题界面（支持英译中和中译英两种题型）"""
     st.markdown("### 📝 单词考察")
     
     for idx, q in enumerate(quiz_data, 1):
         word = q.get("word", "")
         options = q.get("options", [])
+        question_type = q.get("question_type", "en_to_cn")
         
-        st.markdown(f"**{idx}. {word}**")
+        # 根据题型显示不同的提示
+        if question_type == "en_to_cn":
+            st.markdown(f"**{idx}. {word}**")
+            label = f"选择 {idx} 的中文含义"
+        else:
+            st.markdown(f"**{idx}. {word}**")
+            label = f"选择 {idx} 的英文单词"
         
-        options_with_label = ["请选择"] + [f"{chr(65+i)}. {opt}" for i, opt in enumerate(options)]
+        # 只显示实际选项，不包含"请选择"
+        options_with_label = [f"{chr(65+i)}. {opt}" for i, opt in enumerate(options)]
         current_value = answers.get(word, "")
         
         if current_value:
@@ -162,7 +192,7 @@ def render_word_quiz_interface(quiz_data: list, answers: dict, prefix: str = PRE
             current_index = 0
         
         answers[word] = st.radio(
-            f"选择 {idx} 的中文含义",
+            label,
             options=options_with_label,
             index=current_index,
             key=f"{prefix}_radio_{idx}",
@@ -173,7 +203,7 @@ def render_word_quiz_interface(quiz_data: list, answers: dict, prefix: str = PRE
 
 
 def render_word_quiz_result(result: dict) -> None:
-    """渲染结果界面"""
+    """渲染结果界面（支持两种题型）"""
     st.markdown("### 📊 考察结果")
     st.write(f"**正确率**: {result.get('correct_count', 0)}/{result.get('total_count', 0)} = {result.get('accuracy', 0):.1f}%")
     
@@ -181,7 +211,16 @@ def render_word_quiz_result(result: dict) -> None:
     details = result.get("details", [])
     for item in details:
         status = "✅" if item.get("is_correct") else "❌"
-        st.write(f"{status} **{item.get('word', '')}** - 正确: {item.get('correct_answer', '')}")
+        word = item.get("word", "")
+        correct_answer = item.get("correct_answer", "")
+        user_answer = item.get("user_answer", "")
+        
+        # 判断题型：如果用户答案包含选项字母（如 A. xxx），说明是选择题格式
+        if user_answer and any(c.isalpha() and c.isupper() for c in user_answer[:3]):
+            # 提取选项内容（去掉字母前缀）
+            user_answer = user_answer[3:] if len(user_answer) > 3 else user_answer
+        
+        st.write(f"{status} **{word}** - 你的答案: {user_answer or '未作答'} | 正确答案: {correct_answer}")
 
 
 def handle_word_quiz(
@@ -248,7 +287,7 @@ def handle_word_quiz(
     elif status == "submitted":
         render_word_quiz_result(st.session_state.get(f"{prefix}_result", {}))
         
-        if st.button("再来一次"):
+        if st.button("返回"):
             st.session_state[f"{prefix}_status"] = "idle"
             st.session_state[f"{prefix}_data"] = None
             st.session_state[f"{prefix}_answers"] = {}
